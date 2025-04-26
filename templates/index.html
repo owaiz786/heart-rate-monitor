@@ -1,0 +1,391 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heart Rate Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .top-row {
+            display: flex;
+            gap: 20px;
+        }
+        .controls {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            flex: 1;
+        }
+        .video-container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .charts {
+            display: flex;
+            gap: 20px;
+        }
+        .chart-container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            flex: 1;
+        }
+        video, canvas {
+            width: 100%;
+            max-width: 640px;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #stopButton {
+            background-color: #f44336;
+        }
+        .status {
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .heart-rate {
+            font-size: 32px;
+            font-weight: bold;
+            color: #e74c3c;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Real-time Heart Rate Monitor</h1>
+    
+    <div class="container">
+        <div class="top-row">
+            <div class="controls">
+                <h2>Controls</h2>
+                <button id="startButton">Start Monitoring</button>
+                <button id="stopButton" disabled>Stop Monitoring</button>
+                <div id="status" class="status">Status: Ready</div>
+                <div id="heartRate" class="heart-rate">-- BPM</div>
+                <div>
+                    <h3>Instructions:</h3>
+                    <ul>
+                        <li>Position your face clearly in the camera</li>
+                        <li>Make sure you have good lighting</li>
+                        <li>Try to remain still during measurement</li>
+                        <li>Allow ~15 seconds for initial reading</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="video-container">
+                <h2>Video Feed</h2>
+                <video id="video" autoplay muted playsinline></video>
+                <canvas id="processedVideo"></canvas>
+            </div>
+        </div>
+        
+        <div class="charts">
+            <div class="chart-container">
+                <h2>Green Channel Signal</h2>
+                <canvas id="signalChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Heart Rate Trend</h2>
+                <canvas id="hrChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>Note: This is a demonstration application and not intended for medical use.</p>
+    </div>
+    
+    <script>
+        // DOM Elements
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const statusElement = document.getElementById('status');
+        const heartRateElement = document.getElementById('heartRate');
+        const video = document.getElementById('video');
+        const processedVideoCanvas = document.getElementById('processedVideo');
+        const processedVideoCtx = processedVideoCanvas.getContext('2d');
+        
+        // Variables
+        let websocket;
+        let videoStream;
+        let isRunning = false;
+        let animationId;
+        let startTime = null;
+        
+        // Initialize Charts
+        const signalChart = new Chart(document.getElementById('signalChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Green Channel',
+                    data: [],
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 0
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: {
+                            display: true,
+                            text: 'Time (s)'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Intensity'
+                        }
+                    }
+                }
+            }
+        });
+        
+        const hrChart = new Chart(document.getElementById('hrChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Heart Rate',
+                    data: [],
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: {
+                            display: true,
+                            text: 'Time (s)'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'BPM'
+                        },
+                        min: 40,
+                        max: 180
+                    }
+                }
+            }
+        });
+        
+        // Set up event listeners
+        startButton.addEventListener('click', startMonitoring);
+        stopButton.addEventListener('click', stopMonitoring);
+        
+        // Initialize video dimensions
+        function setupVideoCanvas() {
+            const videoWidth = video.videoWidth || 640;
+            const videoHeight = video.videoHeight || 480;
+            
+            processedVideoCanvas.width = videoWidth;
+            processedVideoCanvas.height = videoHeight;
+        }
+        
+        // Start heart rate monitoring
+        async function startMonitoring() {
+            try {
+                // Get webcam access
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 },
+                    audio: false
+                });
+                
+                // Connect webcam to video element
+                video.srcObject = videoStream;
+                video.style.display = 'none';  // Hide the video element since we'll display the processed feed
+                
+                // Wait for video metadata to load
+                await new Promise(resolve => {
+                    video.onloadedmetadata = resolve;
+                });
+                
+                setupVideoCanvas();
+                
+                // Connect to WebSocket
+                websocket = new WebSocket(`ws://${window.location.host}/ws`);
+                
+                websocket.onopen = () => {
+                    console.log('WebSocket connection established');
+                    isRunning = true;
+                    startTime = Date.now();
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+                    statusElement.textContent = 'Status: Starting...';
+                    
+                    // Reset charts
+                    signalChart.data.labels = [];
+                    signalChart.data.datasets[0].data = [];
+                    hrChart.data.labels = [];
+                    hrChart.data.datasets[0].data = [];
+                    signalChart.update();
+                    hrChart.update();
+                    
+                    // Start sending frames
+                    sendFrame();
+                };
+                
+                websocket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    // Update status and heart rate display
+                    if (data.face_detected) {
+                        statusElement.textContent = 'Status: Face detected';
+                        
+                        if (data.heart_rate !== null) {
+                            heartRateElement.textContent = `${data.heart_rate.toFixed(1)} BPM`;
+                            
+                            // Add to HR chart
+                            hrChart.data.labels.push(data.current_time);
+                            hrChart.data.datasets[0].data.push(data.heart_rate);
+                            
+                            // Limit data points for performance
+                            if (hrChart.data.labels.length > 30) {
+                                hrChart.data.labels.shift();
+                                hrChart.data.datasets[0].data.shift();
+                            }
+                            
+                            hrChart.update();
+                        }
+                    } else {
+                        statusElement.textContent = 'Status: No face detected';
+                    }
+                    
+                    // Update processed video display
+                    if (data.processed_image) {
+                        const img = new Image();
+                        img.onload = () => {
+                            processedVideoCtx.drawImage(img, 0, 0);
+                        };
+                        img.src = data.processed_image;
+                    }
+                };
+                
+                websocket.onclose = () => {
+                    console.log('WebSocket connection closed');
+                    isRunning = false;
+                };
+                
+                websocket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    statusElement.textContent = 'Status: Error connecting to server';
+                    stopMonitoring();
+                };
+                
+            } catch (error) {
+                console.error('Error starting monitoring:', error);
+                statusElement.textContent = 'Status: Error accessing camera';
+            }
+        }
+        
+        // Send video frames to the server
+        function sendFrame() {
+            if (!isRunning) return;
+            
+            // Create a temporary canvas to capture the video frame
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            
+            // Convert to base64 and send to server
+            const imageData = canvas.toDataURL('image/jpeg', 0.7);
+            websocket.send(JSON.stringify({
+                image: imageData,
+                timestamp: Date.now()
+            }));
+            
+            // Request next frame
+            animationId = requestAnimationFrame(sendFrame);
+        }
+        
+        // Stop heart rate monitoring
+        function stopMonitoring() {
+            isRunning = false;
+            
+            // Cancel animation frame
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            
+            // Close WebSocket
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.close();
+            }
+            
+            // Stop video stream
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            
+            // Reset UI
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            statusElement.textContent = 'Status: Stopped';
+        }
+    </script>
+</body>
+</html>
