@@ -15,6 +15,13 @@ import os
 
 app = FastAPI()
 
+@app.on_event("startup")
+async def startup_event():
+    static_folder = "static"
+    if os.path.exists(static_folder) and not os.path.isdir(static_folder):
+        raise RuntimeError(f"'{static_folder}' exists but is not a directory!")
+    os.makedirs(static_folder, exist_ok=True)
+
 # Create static directory if it doesn't exist
 os.makedirs("static", exist_ok=True)
 
