@@ -1,4 +1,4 @@
-# main.py
+# Update your main.py file with this code
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,12 +11,18 @@ import base64
 from scipy.signal import butter, lfilter, periodogram, detrend
 from collections import deque
 import asyncio
+import os
 
 app = FastAPI()
+
+# Create static directory if it doesn't exist
+os.makedirs("static", exist_ok=True)
 
 # Mount static files directory
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+# Rest of your code remains the same...
 
 # Signal Processing Functions
 def butter_bandpass(lowcut, highcut, fs, order=4):
