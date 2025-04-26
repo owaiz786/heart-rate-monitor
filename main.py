@@ -23,7 +23,7 @@ async def startup_event():
     os.makedirs(static_folder, exist_ok=True)
 
 # Create static directory if it doesn't exist
-os.makedirs("static", exist_ok=True)
+#os.makedirs("static", exist_ok=True)
 
 # Mount static files directory
 app.mount("/static", StaticFiles(directory="static"), name="static")
